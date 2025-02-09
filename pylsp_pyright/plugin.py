@@ -1,4 +1,7 @@
 import logging
+import subprocess
+import json
+from typing import List, Dict, Any
 
 from pylsp import hookimpl, uris
 from pylsp.config.config import Config
@@ -32,84 +35,50 @@ def pylsp_lint(
 
     """
     settings = config.plugin_settings("pylsp_pyright")
+    executable = "basedpyright" if settings["based"] else "pyright"
+    command = [executable, "--outputjson"]
+    if settings["level"]:
+        level = settings["level"]
+        command.append(f"--level={level}")
+    if settings["pythonpath"]:
+        pythonpath = settings["pythonpath"]
+        command.append(f"--pythonpath={pythonpath}")
+    if settings["ignoreexternal"]:
+        command.append("--ignoreexternal")
+    if settings["skipunannotated"]:
+        command.append("--skipunannotated")
+    command.append(document.path)
+    proc = subprocess.run(command, capture_output=True)
+    output = proc.stdout
+    report = json.loads(output)
+    pyright_diagnostics = report["generalDiagnostics"]
+    lsp_diagnostics = []
+    for pyright_diagnostic in pyright_diagnostics:
+        lsp_diagnostics.append(
+            {
+                "source": "pyright",
+                "range": pyright_diagnostic["range"],
+                "message": pyright_diagnostic["message"],
+                "severity": 1 if pyright_diagnostic["severity"] == "error" else 3,
+                "code": pyright_diagnostic["rule"],
+            }
+        )
+    return lsp_diagnostics
 
 @hookimpl
 def pylsp_settings():
-    logger.info("Initializing pylsp_pyright")
+    logger.error("Initializing pylsp_pyright")
 
     # Disable default plugins that conflicts with our plugin
     return {
         "plugins": {
             "pylsp_pyright": {
-                "enabled": True,
-                "based
-                "level": 0,
+                "based": True,
+                "level": None,
+                "pythonpath": None,
+                "ignoreexternal": False,
+                "skipunannotated": False,
             }
         },
     }
 
-
-@hookimpl
-def pylsp_code_actions(config, workspace, document, range, context):
-    logger.info("textDocument/codeAction: %s %s %s", document, range, context)
-
-    return [
-        {
-            "title": "Extract method",
-            "kind": "refactor.extract",
-            "command": {
-                "command": "example.refactor.extract",
-                "arguments": [document.uri, range],
-            },
-        },
-    ]
-
-
-@hookimpl
-def pylsp_execute_command(config, workspace, command, arguments):
-    logger.info("workspace/executeCommand: %s %s", command, arguments)
-
-    if command == "example.refactor.extract":
-        current_document, range = arguments
-
-        workspace_edit = {
-            "changes": {
-                current_document: [
-                    {
-                        "range": range,
-                        "newText": "replacement text",
-                    },
-                ]
-            }
-        }
-
-        logger.info("applying workspace edit: %s %s", command, workspace_edit)
-        workspace.apply_edit(workspace_edit)
-
-
-@hookimpl
-def pylsp_definitions(config, workspace, document, position):
-    logger.info("textDocument/definition: %s %s", document, position)
-
-    filename = __file__
-    uri = uris.uri_with(document.uri, path=filename)
-    with open(filename) as f:
-        lines = f.readlines()
-        for lineno, line in enumerate(lines):
-            if "def pylsp_definitions" in line:
-                break
-    return [
-        {
-            "uri": uri,
-            "range": {
-                "start": {
-                    "line": lineno,
-                    "character": 4,
-                },
-                "end": {
-                    "line": lineno,
-                    "character": line.find(")") + 1,
-                },
-            }
-        }
-    ]
