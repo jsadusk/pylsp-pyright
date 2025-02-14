@@ -2,6 +2,7 @@ import logging
 import subprocess
 import json
 from typing import List, Dict, Any
+import sys
 
 from pylsp import hookimpl, uris
 from pylsp.config.config import Config
@@ -34,6 +35,9 @@ def pylsp_lint(
         List of the linting data.
 
     """
+    if not is_saved:
+        return []
+
     settings = config.plugin_settings("pylsp_pyright")
     executable = "basedpyright" if settings["based"] else "pyright"
     command = [executable, "--outputjson"]
@@ -54,15 +58,17 @@ def pylsp_lint(
     pyright_diagnostics = report["generalDiagnostics"]
     lsp_diagnostics = []
     for pyright_diagnostic in pyright_diagnostics:
-        lsp_diagnostics.append(
-            {
-                "source": "pyright",
-                "range": pyright_diagnostic["range"],
-                "message": pyright_diagnostic["message"],
-                "severity": 1 if pyright_diagnostic["severity"] == "error" else 3,
-                "code": pyright_diagnostic["rule"],
-            }
-        )
+        if {"range", "message", "severity", "rule"} <= pyright_diagnostic.keys():
+            lsp_diagnostics.append(
+                {
+                    "source": "pyright",
+                    "range": pyright_diagnostic["range"],
+                    "message": pyright_diagnostic["message"],
+                    "severity": 1 if pyright_diagnostic["severity"] == "error" else 3,
+                    "code": pyright_diagnostic["rule"],
+                }
+            )
+
     return lsp_diagnostics
 
 @hookimpl
